@@ -105,4 +105,107 @@ router.get('/concerts/:id', validateApiKey, async (req, res) => {
     }
 });
 
+// Middleware untuk validasi admin
+const validateAdmin = async (req, res, next) => {
+    try {
+        const apiKeyData = req.apiKeyData;
+        
+        // Get user role from database
+        const [users] = await db.query(
+            'SELECT role FROM users WHERE id = ?',
+            [apiKeyData.user_id]
+        );
+
+        if (users.length === 0 || users[0].role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                error: 'Akses ditolak. Hanya admin yang dapat menambah konser.'
+            });
+        }
+
+        next();
+    } catch (error) {
+        console.error('Admin validation error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Terjadi kesalahan sistem'
+        });
+    }
+};
+
+// POST /api/concerts - Menambah konser baru (Admin only)
+router.post('/concerts', validateApiKey, validateAdmin, async (req, res) => {
+    try {
+        const { name, artist, genre, date, time, location, price, description, image_url, music_url } = req.body;
+
+        // Validasi field required
+        if (!name || !artist || !genre || !date || !time || !location || !price) {
+            return res.status(400).json({
+                success: false,
+                error: 'Field wajib: name, artist, genre, date, time, location, price'
+            });
+        }
+
+        // Validasi genre
+        const validGenres = ['rock', 'pop', 'jazz', 'electronic'];
+        if (!validGenres.includes(genre)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Genre harus salah satu dari: rock, pop, jazz, electronic'
+            });
+        }
+
+        // Validasi price adalah number
+        if (isNaN(price) || price < 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Price harus berupa angka positif'
+            });
+        }
+
+        // Validasi format date (YYYY-MM-DD)
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(date)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Format date harus YYYY-MM-DD (contoh: 2026-03-15)'
+            });
+        }
+
+        // Validasi format time (HH:MM)
+        const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+        if (!timeRegex.test(time)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Format time harus HH:MM (contoh: 19:00, 20:30)'
+            });
+        }
+
+        // Insert konser baru
+        const [result] = await db.query(
+            `INSERT INTO concerts (name, artist, genre, date, time, location, price, description, image_url, music_url, created_at, updated_at) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            [name, artist, genre, date, time, location, price, description || '', image_url || '/uploads/concerts/default.jpg', music_url || null]
+        );
+
+        // Get konser yang baru ditambahkan
+        const [newConcert] = await db.query(
+            'SELECT * FROM concerts WHERE id = ?',
+            [result.insertId]
+        );
+
+        res.status(201).json({
+            success: true,
+            message: 'Konser berhasil ditambahkan',
+            data: newConcert[0]
+        });
+    } catch (error) {
+        console.error('API add concert error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Terjadi kesalahan sistem'
+        });
+    }
+});
+
 module.exports = router;
